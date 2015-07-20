@@ -1,27 +1,10 @@
 #include "OneWire.h"
 
 unsigned char ow_bit;
+unsigned int therm_mSec[2];
+unsigned char therm_config[2];
 
-#define sbi(reg,bt) reg |= (1<<bt)
-#define cbi(reg,bt) reg &= ~(1<<bt)
-#define ibi(reg,bt) reg ^= (1<<bt)
-#define CheckBit(reg,bt) (reg&(1<<bt))
-
-#define OW_CMD_SEARCHROM	0xF0
-#define OW_CMD_READROM		0x33
-#define OW_CMD_MATCHROM		0x55
-#define OW_CMD_SKIPROM		0xCC
-
-#define THERM_CMD_CONVERTTEMP 0x44
-#define THERM_CMD_RSCRATCHPAD 0xBE
-#define THERM_CMD_WSCRATCHPAD 0x4E
-#define THERM_CMD_CPYSCRATCHPAD 0x48
-#define THERM_CMD_RECEEPROM 0xB8
-#define THERM_CMD_RPWRSUPPLY 0xB4
-
-#define THERM_CMD_ALARMSEARCH 0xEC
-
-void OW_Set(unsigned char mode)
+inline void OW_Set(unsigned char mode)
 {
   if (mode) 
   {
@@ -35,15 +18,14 @@ void OW_Set(unsigned char mode)
   }
 }
 
-unsigned char OW_CheckIn()
+inline unsigned char OW_CheckIn()
 {
-  return CheckBit(OW_PIN, ow_bit);
+    return CheckBit(OW_PIN, ow_bit);
 }
-
 
 unsigned char OW_Reset(void) //Сброс и сигнал присутствия
 {
-	unsigned char	status;
+	unsigned char status;
 	OW_Set(1);
 	delay_us(480);
 	OW_Set(0);
@@ -52,13 +34,10 @@ unsigned char OW_Reset(void) //Сброс и сигнал присутствия
 	status = OW_CheckIn();
 	delay_us(420);
 	//Return the value read from the presence pulse (0=OK, 1=WRONG)
- return !status;
-//	return 1 if found
-//	return 0 if not found
+  return status; 
 }
 
-
-void OW_WriteBit(unsigned char bt)
+inline void OW_WriteBit(unsigned char bt)
 {
 	//Pull line low for 1uS
 	OW_Set(1);
@@ -67,13 +46,13 @@ void OW_WriteBit(unsigned char bt)
 	if(bt) OW_Set(0); 
 	//Wait for 60uS and release the line
 	delay_us(60);
-	OW_Set(0);
-  delay_us(1);
+    OW_Set(0);
+    delay_us(1);
 }
 
-unsigned char OW_ReadBit(void)
+inline unsigned char OW_ReadBit(void)
 {
-	unsigned char	bt=0;
+	unsigned char bt=0;
 	//Pull line low for 1uS
 	OW_Set(1);
 	delay_us(1);
@@ -89,62 +68,126 @@ unsigned char OW_ReadBit(void)
 
 void OW_WriteByte(unsigned char byte)
 {
-  unsigned char i;
-	for (i=0; i<8; i++) OW_WriteBit(CheckBit(byte, i));
+    unsigned char i;
+    for (i=0; i<8; i++) OW_WriteBit(CheckBit(byte, i));
 }
 
 unsigned char OW_ReadByte(void)
 {
-	unsigned char n=0, i;
-	for (i=0; i<8; i++) if (OW_ReadBit()) sbi(n, i);
-	return n;
+	unsigned char i, res = 0;
+	for (i=0; i<8; i++) if (OW_ReadBit()) sbi(res, i);
+	return res;
 }
 
-unsigned char GetTemperature(char *temper, unsigned char ow_pin)
+
+unsigned char Therm_ReadData(char *data)
 {
-    char i, temp; 
-    ow_bit = ow_pin;
-     
-    //Читаем температуру
-    if(!OW_Reset()) return DEVICE_NOT_FOUND;
-    OW_WriteByte(OW_CMD_SKIPROM);         //Широковещательный адрес
-    OW_WriteByte(THERM_CMD_RSCRATCHPAD);  //Считать 9 байт памяти
-    CRC8_clear();
-    temper[0] = temp = OW_ReadByte();
-    CRC8_add(temp);
-    temper[1] = temp = OW_ReadByte();
-    CRC8_add(temp);
-    for(i=2; i<9; i++)
+    unsigned char i, res, err_code = 0;  
+    char temp[2];
+    if(OW_Reset()) return THERM_NOT_FOUND;
+    OW_WriteByte(OW_CMD_SKIPROM);        //Широковещательный адрес 
+    OW_WriteByte(THERM_CMD_RSCRATCHPAD); //Считать 9 байт памяти
+    
+    CRC8_Clear();
+    for(i=0; i<9; i++)
     {
-        temp = OW_ReadByte();
-        CRC8_add(temp);
+        res = OW_ReadByte();
+        CRC8_Add(res);
+        if(i<2) temp[i] = res; 
+        //Проверка конфигурации
+        if(i==4 && therm_config[ow_bit] != (res & 0b01100000)) 
+            err_code = THERM_CONFIG_ERR;   
     }
- 
-    //Запускаем конвертирование
-    if(!OW_Reset()) return DEVICE_NOT_FOUND;
+    if(CRC8_Check()) return THERM_CRC_ERROR; 
+    data[0] = temp[0];
+    data[1] = temp[1]; 
+    return err_code;      
+}
+
+unsigned char Therm_WriteData(char *data)
+{
+    unsigned char i;
+    if(OW_Reset()) return THERM_NOT_FOUND;
+    OW_WriteByte(OW_CMD_SKIPROM);
+    OW_WriteByte(THERM_CMD_WSCRATCHPAD);  //Запись 3х байт
+    for(i=0; i<3; i++)
+    {
+        OW_WriteByte(data[i]);
+    }
+    return 0;
+}
+
+unsigned char Therm_StartConvert()
+{
+    if(OW_Reset()) return THERM_NOT_FOUND;
     OW_WriteByte(OW_CMD_SKIPROM);
     OW_WriteByte(THERM_CMD_CONVERTTEMP);
-     
-    if(CRC8_check()) return ERROR_CRC;
-    return 0;
+    return 0; 
 }
 
-unsigned char SetConfigTherm(char config, unsigned char ow_pin)
+unsigned char Therm_SaveData()
 {
-    ow_bit = ow_pin;
-    if(!OW_Reset()) return DEVICE_NOT_FOUND;
-    OW_WriteByte(OW_CMD_SKIPROM);         //Широковещательный адрес
-    OW_WriteByte(THERM_CMD_WSCRATCHPAD);  //Запись 3х байт
-    OW_WriteByte(0x00);
-    OW_WriteByte(0x7F);
-    OW_WriteByte(config);
-    
-    if(!OW_Reset()) return DEVICE_NOT_FOUND;
+    if(OW_Reset()) return THERM_NOT_FOUND;
     OW_WriteByte(OW_CMD_SKIPROM);           //Широковещательный адрес
     OW_WriteByte(THERM_CMD_CPYSCRATCHPAD);  //Сохранение настроек
-    return 0;
+    return 0; 
 }
 
+
+
+unsigned char Therm_GetTemp(char *temp, char ow_pin)
+{
+    unsigned char res = 0;
+    ow_bit = ow_pin;
+    
+    if(!OW_ReadBit()) //Ещё конвертируется
+    {
+        if(therm_mSec[ow_bit] > THERM_TIME_OUT_MS)  
+        {   
+            res |= Therm_StartConvert();
+            therm_mSec[ow_bit] = 0;
+            res |= THERM_NOT_CONVERT; 
+        } 
+        return res; 
+    }
+    else
+    {     
+        therm_mSec[ow_bit] = 0;
+        res |= Therm_ReadData(temp);
+        if(res == THERM_CONFIG_ERR || res == 0)
+        {
+            if(temp[0] == 0x50 && temp[1] == 0x05) 
+                res |= THERM_NOT_CONVERT;    
+                
+            res |= Therm_StartConvert();
+        }     
+    }
+    
+    return res;
+}
+
+unsigned char Therm_SetConfig(char config, char ow_pin)
+{
+    ow_bit = ow_pin; 
+    therm_config[ow_bit] = config;
+}
+
+unsigned char Therm_SaveConfig(char ow_pin)
+{
+    unsigned char res, temp[3]={0x00, 0x7F, 0}; 
+    ow_bit = ow_pin; 
+    temp[2] = therm_config[ow_bit];  
+    
+    res |= Therm_WriteData(temp); 
+    if(res == THERM_NOT_FOUND) return THERM_NOT_FOUND;
+    
+    res |= Therm_ReadData(temp); 
+    if(res == 0)
+    {
+        res |= Therm_SaveData();        
+    }
+    return res;  
+}
 
 
 

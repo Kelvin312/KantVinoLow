@@ -37,8 +37,6 @@ Data Stack size         : 256
 
 #define ADC_ERROR0 1
 #define ADC_ERROR1 3
- 
-
 
 eeprom char addressEep;
 
@@ -53,7 +51,9 @@ struct ADCstruct
 } pressure, level; 
 
 unsigned int meteringCount;
-char temperature[2][2], error_code;
+char temperature[2][2], swap_therm, tmp;
+char error_code, errors_count[2][4], last_error;
+
 
 // Standard Input/Output functions
 #include <stdio.h>
@@ -101,12 +101,6 @@ DDRC=0x00;
 PORTD=0x00;
 DDRD=0xF4;
 
-// Timer/Counter 0 initialization
-// Clock source: System Clock
-// Clock value: 250,000 kHz
-TCCR0=0x03;
-TCNT0=0x05;
-
 // Timer/Counter 1 initialization
 // Clock source: System Clock
 // Clock value: Timer1 Stopped
@@ -148,7 +142,7 @@ MCUCR=0x00;
 // Timer(s)/Counter(s) Interrupt(s) initialization
 TIMSK=0x01;
 
-USART_Init();
+USART_and_Timer0_Init();
 
 // Analog Comparator initialization
 // Analog Comparator: Off
@@ -187,9 +181,11 @@ address = addressEep;
 meteringCount = 0;
 pressure.summ = 0;
 level.summ = 0;
-mSec = 600;
 error_code = 0x00;
+swap_therm = 0;
 
+Therm_SetConfig(THERM_SET_11BIT, 0);
+Therm_SetConfig(THERM_SET_11BIT, 1);
 
 while (1)
       {
@@ -209,35 +205,42 @@ while (1)
               pressure.summ += read_adc(0);
               level.summ += read_adc(1);
           }
-          
-          if(mSec > 800)
-          {     
-              mSec = 0; 
-              error_code = 0;
-              error_code |= GetTemperature(temperature[1], 1);
-              error_code <<= 2;
-              error_code |= GetTemperature(temperature[0], 0);     
-          } 
-          
-          
-          
-          if(get_status())
+           
+          last_error = Therm_GetTemp(temperature[swap_therm], swap_therm);
+          if(last_error == THERM_CONFIG_ERR || last_error == 0)
           {   
-          if(rx_buffer[0] == SKIP_ADDRESS)
+              error_code = 0;
+          }
+          swap_therm ^= 1;
+          
+          
+     //     if(mSec > 800)
+     //     {     
+     //         mSec = 0; 
+     //         error_code = 0;
+     //         error_code |= GetTemperature(temperature[1], 1);
+     //         error_code <<= 2;
+     //         error_code |= GetTemperature(temperature[0], 0);     
+     //     } 
+          
+          
+          
+          if(GetRxStatus())  //Что-то приняли
+          {   
+          if(GetRxBuffer(0) == SKIP_ADDRESS)
           { 
-              if(rx_buffer[1] == 0x03 && rx_buffer[2] == 'A') //Чтение адреса
+              if(GetRxBuffer(1) == 0x03 && GetRxBuffer(2) == 'A') //Чтение адреса
               {    
-                        tx_buffer[0] = 0x55;
-                        tx_buffer[1] = address;
-                        tx_buffer[2] = 0x03;
-                        tx_buffer[3] = 8;
-                        tx_buffer[4] = address;
-                        start_transmit();  
+                  AddTransmit(address, 0);  
+                  AddTransmit(GetRxBuffer(1), 1);
+                  AddTransmit(6, 2);
+                  AddTransmit(address, 3);   
+                  StartTransmit(); 
               }   
           }
           else
           { 
-              if(rx_buffer[1] == 0x03 && rx_buffer[2] == 'G') //Чтение данных
+              if(GetRxBuffer(1) == 0x03 && GetRxBuffer(2) == 'D') //Чтение данных
               {
                   error_code &= 0x0F; 
                   // 0 < x < 0x7FE00
@@ -246,47 +249,32 @@ while (1)
                   if(pressure.real > 523760) error_code |= ADC_ERROR1<<4;
                   if(level.real < 16) error_code |= ADC_ERROR0<<6;
                   if(level.real > 523760) error_code |= ADC_ERROR1<<6;
-
+                     
+                  tmp = GetRxBuffer(1);
+                  if(error_code) tmp |= 0x80;
                   
-                        tx_buffer[0] = 0x55;
-                        tx_buffer[1] = address;
-                        tx_buffer[2] = 0x03;
-                        if(error_code)  tx_buffer[2] |= 0x80;
-                        tx_buffer[3] = 20;
-                    
-                        tx_buffer[4] = temperature[0][0];
-                        tx_buffer[5] = temperature[0][1];
-                        tx_buffer[6] = temperature[1][0];
-                        tx_buffer[7] = temperature[1][1];
-                        
-                        tx_buffer[8] = pressure.to_byte[0];
-                        tx_buffer[9] = pressure.to_byte[1];
-                        tx_buffer[10] = pressure.to_byte[2];
-                        tx_buffer[11] = pressure.to_byte[3];
-                        
-                        tx_buffer[12] = level.to_byte[0];
-                        tx_buffer[13] = level.to_byte[1];
-                        tx_buffer[14] = level.to_byte[2];
-                        tx_buffer[15] = level.to_byte[3];
-                        
-                        tx_buffer[16] = error_code; 
-                        start_transmit();
-                      
+                  AddTransmit(address, 0);  
+                  AddTransmit(tmp, 1);
+                  AddTransmit(18, 2);
+                  
+                  AddTransmits(temperature[0], 2, 3); 
+                  AddTransmits(temperature[1], 2, 5);
+                  AddTransmits(pressure.to_byte, 4, 7); 
+                  AddTransmits(level.to_byte, 4, 11);
+                  
+                  AddTransmit(error_code, 15); 
+                  StartTransmit();     
               }
-              if(rx_buffer[1] == 0x10 && rx_buffer[2] == 'A') //Смена адреса
+              if(GetRxBuffer(1) == 0x10 && GetRxBuffer(2) == 'A') //Смена адреса
               {
-                  address = rx_buffer[3];
+                  address = GetRxBuffer(3);
                   addressEep = address;
                   
-                  SetConfigTherm(TERM_11BIT, 0); //Установка 11 битного режима (375 мс)
-                  SetConfigTherm(TERM_11BIT, 1);
-                  
-                        tx_buffer[0] = 0x55;
-                        tx_buffer[1] = address;
-                        tx_buffer[2] = 0x10;
-                        tx_buffer[3] = 8;
-                        tx_buffer[4] = 'S';
-                        start_transmit();   
+                  AddTransmit(address, 0);  
+                  AddTransmit(GetRxBuffer(1), 1);
+                  AddTransmit(6, 2);
+                  AddTransmit('S', 3);   
+                  StartTransmit();   
               }
           }  
           }
