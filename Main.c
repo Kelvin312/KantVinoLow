@@ -27,7 +27,6 @@ Data Stack size         : 256
 
 #include "USART.h"
 #include "OneWire.h"
-
  
 #define HOT PORTD.4
 #define COLD PORTD.5
@@ -50,9 +49,10 @@ struct ADCstruct
     unsigned long summ;
 } pressure, level; 
 
-unsigned int meteringCount;
-char temperature[2][2], swap_therm, tmp;
-char error_code, errors_count[2][4], last_error;
+unsigned int meteringCount, adc_calib1V3;
+char temperature[2][2], swap_therm, isSaveConfig;
+char tmp, last_error, therm_error, adc_error; 
+unsigned char errors_count[2][4];
 
 
 // Standard Input/Output functions
@@ -181,8 +181,9 @@ address = addressEep;
 meteringCount = 0;
 pressure.summ = 0;
 level.summ = 0;
-error_code = 0x00;
 swap_therm = 0;
+therm_error = 0x0F;
+isSaveConfig = 3;
 
 Therm_SetConfig(THERM_SET_11BIT, 0);
 Therm_SetConfig(THERM_SET_11BIT, 1);
@@ -206,24 +207,50 @@ while (1)
               level.summ += read_adc(1);
           }
            
-          last_error = Therm_GetTemp(temperature[swap_therm], swap_therm);
-          if(last_error == THERM_CONFIG_ERR || last_error == 0)
-          {   
-              error_code = 0;
+          //Читаем термометры
+          last_error = Therm_GetTemp(temperature[swap_therm], swap_therm); 
+
+          if(swap_therm)
+          {
+              therm_error &= (last_error<<2) | 3;
+              if((isSaveConfig & 2) && last_error == THERM_CONFIG_ERR)
+              {
+                        Therm_SaveConfig(swap_therm);
+                        isSaveConfig &= 1;
+              }
           }
+          else
+          {
+              therm_error &= (last_error) | 12;
+              if((isSaveConfig & 1) && last_error == THERM_CONFIG_ERR)
+              {
+                        Therm_SaveConfig(swap_therm);
+                        isSaveConfig &= 2;
+              }
+          }
+          
+          if((last_error & THERM_NOT_FOUND) == THERM_NOT_FOUND)
+          {
+              errors_count[swap_therm][0]++;
+          }
+          else 
+          {
+            if(last_error & THERM_CRC_ERROR)
+            {
+              errors_count[swap_therm][1]++;
+            }
+            if(last_error & THERM_NOT_CONVERT)
+            {
+              errors_count[swap_therm][2]++;
+            }
+            if(last_error & THERM_CONFIG_ERR)
+            {
+              errors_count[swap_therm][3]++;
+            }
+          }
+          
           swap_therm ^= 1;
-          
-          
-     //     if(mSec > 800)
-     //     {     
-     //         mSec = 0; 
-     //         error_code = 0;
-     //         error_code |= GetTemperature(temperature[1], 1);
-     //         error_code <<= 2;
-     //         error_code |= GetTemperature(temperature[0], 0);     
-     //     } 
-          
-          
+          //Закончили с термометрами
           
           if(GetRxStatus())  //Что-то приняли
           {   
@@ -231,10 +258,10 @@ while (1)
           { 
               if(GetRxBuffer(1) == 0x03 && GetRxBuffer(2) == 'A') //Чтение адреса
               {    
-                  AddTransmit(address, 0);  
-                  AddTransmit(GetRxBuffer(1), 1);
-                  AddTransmit(6, 2);
-                  AddTransmit(address, 3);   
+                  AddTransmit(address);  
+                  AddTransmit(GetRxBuffer(1));
+                  AddTransmit(6);
+                  AddTransmit(address);   
                   StartTransmit(); 
               }   
           }
@@ -242,41 +269,86 @@ while (1)
           { 
               if(GetRxBuffer(1) == 0x03 && GetRxBuffer(2) == 'D') //Чтение данных
               {
-                  error_code &= 0x0F; 
+                  adc_error = 0x00; 
                   // 0 < x < 0x7FE00
                   
-                  if(pressure.real < 16) error_code |= ADC_ERROR0<<4;
-                  if(pressure.real > 523760) error_code |= ADC_ERROR1<<4;
-                  if(level.real < 16) error_code |= ADC_ERROR0<<6;
-                  if(level.real > 523760) error_code |= ADC_ERROR1<<6;
+                  if(pressure.real < 16) adc_error |= ADC_ERROR0;
+                  if(pressure.real > 523760) adc_error |= ADC_ERROR1;
+                  if(level.real < 16) adc_error |= ADC_ERROR0<<2;
+                  if(level.real > 523760) adc_error |= ADC_ERROR1<<2;
                      
                   tmp = GetRxBuffer(1);
-                  if(error_code) tmp |= 0x80;
+                  if(adc_error || therm_error) tmp |= 0x80;
                   
-                  AddTransmit(address, 0);  
-                  AddTransmit(tmp, 1);
-                  AddTransmit(18, 2);
+                  AddTransmit(address);  
+                  AddTransmit(tmp);
+                  AddTransmit(18);
                   
-                  AddTransmits(temperature[0], 2, 3); 
-                  AddTransmits(temperature[1], 2, 5);
-                  AddTransmits(pressure.to_byte, 4, 7); 
-                  AddTransmits(level.to_byte, 4, 11);
+                  AddTransmits(temperature[0], 2); 
+                  AddTransmits(temperature[1], 2);
+                  AddTransmits(pressure.to_byte, 4); 
+                  AddTransmits(level.to_byte, 4);
                   
-                  AddTransmit(error_code, 15); 
-                  StartTransmit();     
+                  AddTransmit((adc_error<<4) | therm_error); 
+                  
+                  StartTransmit();
+                  
+                  therm_error = 0x0F;     
               }
               if(GetRxBuffer(1) == 0x10 && GetRxBuffer(2) == 'A') //Смена адреса
               {
                   address = GetRxBuffer(3);
                   addressEep = address;
                   
-                  AddTransmit(address, 0);  
-                  AddTransmit(GetRxBuffer(1), 1);
-                  AddTransmit(6, 2);
-                  AddTransmit('S', 3);   
+                  AddTransmit(address);  
+                  AddTransmit(GetRxBuffer(1));
+                  AddTransmit(6);
+                  AddTransmit('S');   
                   StartTransmit();   
               }
-          }  
+              
+              if(GetRxBuffer(1) == 0x03 && GetRxBuffer(2) == 'E') //Чтение ошибок 
+              {
+                  adc_calib1V3 = read_adc(14); //1110 = 1.30V (VBG)
+              
+                  AddTransmit(address);  
+                  AddTransmit(GetRxBuffer(1));
+                  AddTransmit(9 + 10);
+                  AddUpTime(); //3+4+2=9 
+                  
+                  AddTransmits(errors_count[0], 4);
+                  AddTransmits(errors_count[1], 4);
+                  AddTransmit(adc_calib1V3 & 0xFF);
+                  AddTransmit(adc_calib1V3 >> 8);
+                     
+                  StartTransmit(); 
+                  
+                  for(tmp=0; tmp<4; tmp++)
+                  {
+                      errors_count[0][tmp]=0; 
+                      errors_count[1][tmp]=0;
+                  }
+              }
+              
+              if(GetRxBuffer(1) == 0x10 && GetRxBuffer(2) == 'O') //Установка выходов
+              {        
+                  tmp = GetRxBuffer(3);
+                  if(CheckBit(tmp,7)) HOT = (CheckBit(tmp,3))? 1:0;
+                  if(CheckBit(tmp,6)) COLD = (CheckBit(tmp,2))? 1:0;
+                  if(CheckBit(tmp,5)) CLAP = (CheckBit(tmp,1))? 1:0;
+                  if(CheckBit(tmp,4)) ALARM = (CheckBit(tmp,0))? 1:0;
+                  tmp = (HOT<<3) | (COLD<<2) | (CLAP<<1) | ALARM; 
+                  
+                  AddTransmit(address);  
+                  AddTransmit(GetRxBuffer(1));
+                  AddTransmit(6);
+                  AddTransmit(tmp);
+                  
+                  StartTransmit();    
+              }
+              
+          }
+          ClearRxBuffer();  
           }
       }
 }

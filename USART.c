@@ -44,8 +44,9 @@ inline void ClearAllRxBuffer()
     #asm("sei")
 }
 
-inline void ClearRxBuffer(char size)
+inline void ClearRxBuffer()
 {
+    char size = RX_COMMAND_SIZE;
     if(rx_counter < size) return; 
     #asm("cli") 
     rx_counter -= size;
@@ -100,7 +101,7 @@ char GetRxStatus()
 // USART Transmitter buffer
 char tx_buffer[TX_BUFFER_SIZE];
 unsigned char tx_wr_index,tx_rd_index,tx_counter;
-unsigned char tx_mSec, tx_status;
+unsigned char tx_mSec, tx_status, tx_st_index;
 
 inline void usart_tx_fun()
 {
@@ -183,10 +184,17 @@ void USART_and_Timer0_Init()
     TCNT0=0x05;   
     // Timer(s)/Counter(s) Interrupt(s) initialization
     TIMSK |= 0x01;
-         
+        
+     
     transmit_flag = 0;
     tx_status = TX_WR_OFF;
     RS485 = RS_READ; 
+    tx_rd_index = 0;
+    tx_counter = 0;
+    tx_st_index = 0;
+    tx_wr_index = tx_st_index + 1;
+    
+    ClearAllRxBuffer();
     
     // USART initialization
     // Communication Parameters: 8 Data, 1 Stop, No Parity
@@ -203,33 +211,29 @@ void USART_and_Timer0_Init()
 
 inline char GetTxBuffer(char index)
 {
-    index += tx_wr_index + 1;
+    index += tx_st_index + 1;
     if(index >= TX_BUFFER_SIZE) index -= TX_BUFFER_SIZE;
     return tx_buffer[index];
 }
 
-void AddTransmits(char *data, char size, char index)
+void AddTransmits(char *data, char size)
 {
-    int i;
-    index += tx_wr_index + 1;
-    if(index >= TX_BUFFER_SIZE) index -= TX_BUFFER_SIZE;
-    for(i=0; i < size; i++)
+    while(size--)
     {
-        tx_buffer[index++] = data[i];
-        if(index >= TX_BUFFER_SIZE) index -= TX_BUFFER_SIZE;
+        tx_buffer[tx_wr_index] = *data++;
+        if(++tx_wr_index == TX_BUFFER_SIZE) tx_wr_index = 0;
     }
 }
 
-void AddTransmit(char data, char index)
+void AddTransmit(char data)
 {   
-    index += tx_wr_index + 1;
-    if(index >= TX_BUFFER_SIZE) index -= TX_BUFFER_SIZE;
-    tx_buffer[index] = data;
+    tx_buffer[tx_wr_index] = data;
+    if(++tx_wr_index == TX_BUFFER_SIZE) tx_wr_index = 0;
 }
 
-void AddUpTime(char index)
+void AddUpTime()
 {
-    AddTransmits(upTime, 4, index);
+    AddTransmits(upTime, 4);
 }
 
 void StartTransmit()
@@ -244,16 +248,17 @@ void StartTransmit()
         CRC16_Add(GetTxBuffer(i));
     }     
     CRC16_Get(temp);
-    AddTransmits(temp, 2, size);
-     
-    size += 2;
-    AddTransmit(0x2A, size);   
-    size += 2;
-    tx_buffer[tx_wr_index] = 0x55; 
+    AddTransmits(temp, 2);
+    
+    AddTransmit(0x2A);
+    tx_buffer[tx_st_index] = 0x55; 
+    size += 4;
     #asm("cli")
     tx_counter += size;
-    #asm("sei")  
-    tx_wr_index += size;
+    #asm("sei")
+    tx_st_index += size;  
+    tx_wr_index = tx_st_index + 1; 
+    if(tx_st_index >= TX_BUFFER_SIZE) tx_st_index -= TX_BUFFER_SIZE;  
     if(tx_wr_index >= TX_BUFFER_SIZE) tx_wr_index -= TX_BUFFER_SIZE;  
     
      if(tx_status == TX_WR_OFF)

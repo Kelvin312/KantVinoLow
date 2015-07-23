@@ -17,7 +17,7 @@ extern char address; //Адрес устройства
 
 char GetRxStatus();
 inline char GetRxBuffer(char index);
-inline void ClearRxBuffer(char size);
+inline void ClearRxBuffer();
 
 
 // USART Transmitter buffer
@@ -31,9 +31,9 @@ inline void ClearRxBuffer(char size);
 #define TX_END_TIME 8
 
 
-void AddTransmits(char *data, char size, char index);
-void AddTransmit(char data, char index);
-void AddUpTime(char index);
+void AddTransmits(char *data, char size);
+void AddTransmit(char data);
+void AddUpTime();
 void StartTransmit();
 inline char GetTxBuffer(char index);
 

@@ -13,14 +13,17 @@
 extern unsigned int therm_mSec[2];
 
 unsigned char Therm_GetTemp(char *temp, char ow_pin);
-unsigned char Therm_SetConfig(char config, char ow_pin);
+void Therm_SetConfig(char config, char ow_pin);
 unsigned char Therm_SaveConfig(char ow_pin);
+
+extern flash unsigned char shiftMas[8];
+#define sbi(reg,bt) reg |= (shiftMas[bt])
+#define cbi(reg,bt) reg &= ~(shiftMas[bt])
+#define ibi(reg,bt) reg ^= (shiftMas[bt])
+#define CheckBit(reg,bt) (reg&(shiftMas[bt]))
+
 #pragma used-
 
-#define sbi(reg,bt) reg |= (1<<bt)
-#define cbi(reg,bt) reg &= ~(1<<bt)
-#define ibi(reg,bt) reg ^= (1<<bt)
-#define CheckBit(reg,bt) (reg&(1<<bt))
 
 #define OW_CMD_SEARCHROM    0xF0
 #define OW_CMD_READROM      0x33

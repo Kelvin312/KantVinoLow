@@ -1,8 +1,11 @@
 #include "OneWire.h"
 
 unsigned char ow_bit;
-unsigned int therm_mSec[2];
+//unsigned int therm_mSec[2];
 unsigned char therm_config[2];
+
+flash unsigned char shiftMas[8] = {1, 2, 4, 8, 16, 32, 64, 128};
+
 
 inline void OW_Set(unsigned char mode)
 {
@@ -139,19 +142,16 @@ unsigned char Therm_GetTemp(char *temp, char ow_pin)
 {
     unsigned char res = 0;
     ow_bit = ow_pin;
-    
-    if(!OW_ReadBit()) //Ещё конвертируется
+    if(!OW_ReadBit()) //Не прочитали
     {
-        if(therm_mSec[ow_bit] > THERM_TIME_OUT_MS)  
-        {   
-            res |= Therm_StartConvert();
-            therm_mSec[ow_bit] = 0;
-            res |= THERM_NOT_CONVERT; 
-        } 
-        return res; 
+        if(therm_mSec[ow_bit] > THERM_TIME_OUT_MS)
+        {
+            res |= THERM_NOT_CONVERT;
+        }
+        else return res;
     }
-    else
-    {     
+    //Прочитали 
+       
         therm_mSec[ow_bit] = 0;
         res |= Therm_ReadData(temp);
         if(res == THERM_CONFIG_ERR || res == 0)
@@ -160,13 +160,12 @@ unsigned char Therm_GetTemp(char *temp, char ow_pin)
                 res |= THERM_NOT_CONVERT;    
                 
             res |= Therm_StartConvert();
-        }     
-    }
-    
+        }
+         
     return res;
 }
 
-unsigned char Therm_SetConfig(char config, char ow_pin)
+void Therm_SetConfig(char config, char ow_pin)
 {
     ow_bit = ow_pin; 
     therm_config[ow_bit] = config;
@@ -174,7 +173,7 @@ unsigned char Therm_SetConfig(char config, char ow_pin)
 
 unsigned char Therm_SaveConfig(char ow_pin)
 {
-    unsigned char res, temp[3]={0x00, 0x7F, 0}; 
+    unsigned char res=0, temp[3]={0x00, 0x7F, 0}; 
     ow_bit = ow_pin; 
     temp[2] = therm_config[ow_bit];  
     
