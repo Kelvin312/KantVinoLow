@@ -16,7 +16,7 @@ unsigned char Therm_GetTemp(char *temp, char ow_pin);
 void Therm_SetConfig(char config, char ow_pin);
 unsigned char Therm_SaveConfig(char ow_pin);
 
-extern flash unsigned char shiftMas[8];
+extern unsigned char shiftMas[8];
 #define sbi(reg,bt) reg |= (shiftMas[bt])
 #define cbi(reg,bt) reg &= ~(shiftMas[bt])
 #define ibi(reg,bt) reg ^= (shiftMas[bt])

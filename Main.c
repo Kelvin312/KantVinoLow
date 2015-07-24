@@ -33,7 +33,7 @@ Data Stack size         : 256
 #define CLAP PORTD.6
 #define ALARM PORTD.7
 
-
+#define ADC_ERROR_VAL 32
 #define ADC_ERROR0 1
 #define ADC_ERROR1 3
 
@@ -44,6 +44,7 @@ struct ADCstruct
     union
     {
         unsigned long real;
+        unsigned int to_int;
         char to_byte[4];
     };
     unsigned long summ;
@@ -194,8 +195,8 @@ while (1)
           
           if(++meteringCount > 512)
           {   
-              pressure.real = pressure.summ;
-              level.real = level.summ;
+              pressure.real = pressure.summ >> 3;
+              level.real = level.summ >> 3;
            
               pressure.summ = 0;
               level.summ = 0;
@@ -272,22 +273,22 @@ while (1)
                   adc_error = 0x00; 
                   // 0 < x < 0x7FE00
                   
-                  if(pressure.real < 16) adc_error |= ADC_ERROR0;
-                  if(pressure.real > 523760) adc_error |= ADC_ERROR1;
-                  if(level.real < 16) adc_error |= ADC_ERROR0<<2;
-                  if(level.real > 523760) adc_error |= ADC_ERROR1<<2;
+                  if(pressure.to_int < ADC_ERROR_VAL) adc_error |= ADC_ERROR0;
+                  if(pressure.to_int > (0xFFC0 - ADC_ERROR_VAL)) adc_error |= ADC_ERROR1;
+                  if(level.to_int < ADC_ERROR_VAL) adc_error |= ADC_ERROR0<<2;
+                  if(level.to_int > (0xFFC0 - ADC_ERROR_VAL)) adc_error |= ADC_ERROR1<<2;
                      
                   tmp = GetRxBuffer(1);
                   if(adc_error || therm_error) tmp |= 0x80;
                   
                   AddTransmit(address);  
                   AddTransmit(tmp);
-                  AddTransmit(18);
+                  AddTransmit(14);
                   
                   AddTransmits(temperature[0], 2); 
                   AddTransmits(temperature[1], 2);
-                  AddTransmits(pressure.to_byte, 4); 
-                  AddTransmits(level.to_byte, 4);
+                  AddTransmits(pressure.to_byte, 2); 
+                  AddTransmits(level.to_byte, 2);
                   
                   AddTransmit((adc_error<<4) | therm_error); 
                   

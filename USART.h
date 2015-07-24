@@ -7,7 +7,7 @@
 
 
 // USART Receiver buffer
-#define RX_BUFFER_SIZE 96
+#define RX_BUFFER_SIZE 128
 
 #define RX_COMMAND_SIZE 6
 #define RX_TIMEOUT 4
@@ -21,7 +21,7 @@ inline void ClearRxBuffer();
 
 
 // USART Transmitter buffer
-#define TX_BUFFER_SIZE 32
+#define TX_BUFFER_SIZE 48
 
 #define TX_WR_OFF 0
 #define TX_WR_INIT 1

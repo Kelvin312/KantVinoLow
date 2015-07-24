@@ -4,7 +4,7 @@ unsigned char ow_bit;
 //unsigned int therm_mSec[2];
 unsigned char therm_config[2];
 
-flash unsigned char shiftMas[8] = {1, 2, 4, 8, 16, 32, 64, 128};
+unsigned char shiftMas[8] = {1, 2, 4, 8, 16, 32, 64, 128};
 
 
 inline void OW_Set(unsigned char mode)
